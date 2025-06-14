@@ -8,7 +8,7 @@ import random
 from .utils import STS
 from database import Db, db
 from .test import CLIENT, get_client, iter_messages
-from config import *
+from config import Config, temp
 from script import Script
 from pyrogram import Client, filters 
 from pyrogram.errors import FloodWait, MessageNotModified
