@@ -2,7 +2,7 @@ import os
 import sys
 import asyncio 
 from database import Db, db
-from config import *  
+from config import Config, temp
 from script import Script
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
