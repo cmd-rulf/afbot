@@ -22,7 +22,7 @@ logger.setLevel(logging.INFO)
 TEXT = Script.TEXT
 
 # -------- SUPERFAST BATCH FORWARDING --------
-async def fast_batch_forward(user, bot, msg_ids, m, sts, protect, batch_size=50):
+async def fast_batch_forward(user, bot, msg_ids, m, sts, protect, batch_size=200):
     """
     Forward messages in batches with concurrency and FloodWait handling.
     batch_size: number of parallel forwards (tune for your server and Telegram limits)
@@ -51,8 +51,7 @@ async def fast_batch_forward(user, bot, msg_ids, m, sts, protect, batch_size=50)
     for batch in batches:
         tasks = [forward_one(mid) for mid in batch]
         await asyncio.gather(*tasks)
-        # Optional: a very short sleep to avoid FloodWait, tune as needed
-        await asyncio.sleep(0.3)
+        # No sleep between public batches for max speed!
 
 @Client.on_callback_query(filters.regex(r'^start_public'))
 async def pub_(bot, message):
@@ -104,6 +103,110 @@ async def pub_(bot, message):
     await msg_edit(m, "<code>processing..</code>")
     try: 
        await client.get_messages(sts.get("FROM"), sts.get("limit"))
+    except:
+       await msg_edit(m, f"**Source chat may be a private channel / group. Use userbot (user must be member over there) or  if Make Your [Bot](t.me/{_bot['username']}) an admin over there**", retry_btn(frwd_id))
+       return await stop(client, user)
+    try:
+       k = await client.send_message(i.TO, "Testing")
+       await k.delete()
+    except:
+       await msg_edit(m, f"**Please Make Your [UserBot / Bot](t.me/{_bot['username']}) Admin In Target Channel With Full Permissions**", retry_btn(frwd_id), True)
+       return await stop(client, user)
+    user_have_db = False
+    dburi = datas['db_uri']
+    if dburi is not None:
+        connected, user_db = await connect_user_db(user, dburi, i.TO)
+        if not connected:
+            await msg_edit(m, "<code>Cannot Connected Your db Errors Found Dup files Have Been Skipped after Restart</code>")
+        else:
+            user_have_db = True
+    temp.forwardings += 1
+    await db.add_frwd(user)
+    await send(client, user, "<b>Fᴏʀᴡᴀᴅɪɴɢ sᴛᴀʀᴛᴇᴅ 🌼</b>")
+    sts.add(time=True)
+    temp.IS_FRWD_CHAT.append(i.TO)
+    temp.lock[user] = locked = True
+    dup_files = []
+    if locked:
+        try:
+          pling=0
+          # SUPERFAST: batch_size = 200 for public forward (forward_tag True)
+          batch_size = 200
+          MSG = []
+          await edit(user, m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 5, sts)
+          async for message in iter_messages(client, chat_id=sts.get("FROM"), limit=sts.get("limit"), offset=sts.get("skip"), filters=filter, max_size=max_size):
+                if await is_cancelled(client, user, m, sts):
+                   if user_have_db:
+                      await user_db.drop_all()
+                      await user_db.close()
+                   return
+                if pling %20 == 0: 
+                   await edit(user, m, 'ᴘʀᴏɢʀᴇssɪɴɢ', 5, sts)
+                pling += 1
+                sts.add('fetched')
+                if message == "DUPLICATE":
+                   sts.add('duplicate')
+                   continue
+                elif message == "FILTERED":
+                   sts.add('filtered')
+                   continue 
+                elif message.empty or message.service:
+                   sts.add('deleted')
+                   continue
+                elif message.document and await extension_filter(extensions, message.document.file_name):
+                   sts.add('filtered')
+                   continue 
+                elif message.document and await keyword_filter(keywords, message.document.file_name):
+                   sts.add('filtered')
+                   continue 
+                elif message.document and await size_filter(max_size, min_size, message.document.file_size):
+                   sts.add('filtered')
+                   continue 
+                elif message.document and message.document.file_id in dup_files:
+                   sts.add('duplicate')
+                   continue
+                if message.document and datas['skip_duplicate']:
+                    dup_files.append(message.document.file_id)
+                    if user_have_db:
+                        await user_db.add_file(message.document.file_id)
+                # --------- SUPERFAST FORWARD FOR PUBLIC ONLY --------
+                if forward_tag:
+                    MSG.append(message.id)
+                    notcompleted = len(MSG)
+                    completed = sts.get('total') - sts.get('fetched')
+                    # Only for public, batch_size=200, no sleep!
+                    if notcompleted >= batch_size or completed <= batch_size:
+                        await fast_batch_forward(user, client, MSG, m, sts, protect, batch_size=batch_size)
+                        sts.add('total_files', notcompleted)
+                        MSG = []
+                else:
+                    new_caption = custom_caption(message, caption)
+                    details = {"msg_id": message.id, "media": media(message), "caption": new_caption, 'button': button, "protect": protect}
+                    await copy(user, client, details, m, sts)
+                    sts.add('total_files')
+                    await asyncio.sleep(0.1)  # minimal sleep for non-public
+          # Final batch flush (public only)
+          if forward_tag and MSG:
+              await fast_batch_forward(user, client, MSG, m, sts, protect, batch_size=batch_size)
+              sts.add('total_files', len(MSG))
+        except Exception as e:
+            await msg_edit(m, f'<b>ERROR:</b>\n<code>{e}</code>', wait=True)
+            print(e)
+            if user_have_db:
+                await user_db.drop_all()
+                await user_db.close()
+            temp.IS_FRWD_CHAT.remove(sts.TO)
+            return await stop(client, user)
+        temp.IS_FRWD_CHAT.remove(sts.TO)
+        await send(client, user, "<b>🎉 ғᴏʀᴡᴀᴅɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ</b>")
+        await edit(user, m, 'ᴄᴏᴍᴘʟᴇᴛᴇᴅ', "completed", sts) 
+        if user_have_db:
+            await user_db.drop_all()
+            await user_db.close()
+        await stop(client, user)
+
+# ====== rest of your utility and callback handlers below ======
+# ... (the rest of your file remains unchanged) ...       await client.get_messages(sts.get("FROM"), sts.get("limit"))
     except:
        await msg_edit(m, f"**Source chat may be a private channel / group. Use userbot (user must be member over there) or  if Make Your [Bot](t.me/{_bot['username']}) an admin over there**", retry_btn(frwd_id))
        return await stop(client, user)
