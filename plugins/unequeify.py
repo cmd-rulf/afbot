@@ -1,7 +1,7 @@
 import re, asyncio
 from database import Db, db
 from config import Config, temp
-from .test import CLIENT, get_client
+from .test import CLIENT, get_client, iter_messages
 from script import Script
 import base64
 from pyrogram.file_id import FileId
@@ -64,7 +64,7 @@ async def unequify(client, message):
    if target.text and target.text.startswith("/"):
       return await message.reply("**process cancelled !**")
    elif target.text:
-      regex = re.compile("(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
+      regex = re.compile(r"(https://)?(t\.me/|telegram\.me/|telegram\.dog/)(c/)?(\d+|[a-zA-Z_0-9]+)/(\d+)$")
       match = regex.match(target.text.replace("?single", ""))
       if not match:
          return await message.reply('**Invalid link**')
@@ -99,34 +99,65 @@ async def unequify(client, message):
    total=deleted=0
    temp.lock[user_id] = True
    temp.CANCEL[user_id] = False
+   
    try:
      await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-     async for message in bot.search_messages(chat_id=chat_id, filter=enums.MessagesFilter.DOCUMENT):
+     
+     total_count = 0
+     async for msg in bot.get_chat_history(chat_id, limit=1):
+         if msg.id:
+             total_count = msg.id
+     
+     async for message in iter_messages(bot, chat_id=chat_id, limit=total_count, offset=0):
         if temp.CANCEL.get(user_id) == True:
            await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴄᴀɴᴄᴇʟʟᴇᴅ"), reply_markup=COMPLETED_BTN)
            return await bot.stop()
-        file = message.document
-        file_id = unpack_new_file_id(file.file_id) 
-        if file_id in MESSAGES:
-           DUPLICATE.append(message.id)
-        else:
-           MESSAGES.append(file_id)
-        total += 1
-        if total %1000 == 0:
-           await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-        if len(DUPLICATE) >= 100:
-           await bot.delete_messages(chat_id, DUPLICATE)
-           deleted += 100
-           await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
-           DUPLICATE = []
+        
+        # Check for documents and videos
+        file_id = None
+        if message.document:
+            file_id = unpack_new_file_id(message.document.file_id)
+        elif message.video:
+            file_id = unpack_new_file_id(message.video.file_id)
+        # elif message.audio:
+        #     file_id = unpack_new_file_id(message.audio.file_id)
+        # elif message.photo:
+        #     file_id = unpack_new_file_id(message.photo.file_id)
+        
+        if file_id:
+            if file_id in MESSAGES:
+               DUPLICATE.append(message.id)
+            else:
+               MESSAGES.append(file_id)
+            total += 1
+            
+            # Show progress every 100 messages
+            if total % 100 == 0:
+               await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
+            
+            # Delete duplicates in batches of 100
+            if len(DUPLICATE) >= 100:
+               try:
+                   await bot.delete_messages(chat_id, DUPLICATE)
+                   deleted += len(DUPLICATE)
+                   await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴘʀᴏɢʀᴇssɪɴɢ"), reply_markup=CANCEL_BTN)
+                   DUPLICATE = []
+               except Exception as e:
+                   print(f"Error deleting messages: {e}")
+                   continue
+     
      if DUPLICATE:
-        await bot.delete_messages(chat_id, DUPLICATE)
-        deleted += len(DUPLICATE)
+        try:
+            await bot.delete_messages(chat_id, DUPLICATE)
+            deleted += len(DUPLICATE)
+        except Exception as e:
+            print(f"Error deleting remaining messages: {e}")
+            
    except Exception as e:
        temp.lock[user_id] = False 
        await sts.edit(f"**ERROR**\n`{e}`")
        return await bot.stop()
+   
    temp.lock[user_id] = False
    await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴄᴏᴍᴘʟᴇᴛᴇᴅ"), reply_markup=COMPLETED_BTN)
    await bot.stop()
-
