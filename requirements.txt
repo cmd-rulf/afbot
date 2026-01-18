@@ -8,7 +8,6 @@ pymongo
 umongo
 psutil
 pytz
-
 Flask
 gunicorn
 Jinja2
