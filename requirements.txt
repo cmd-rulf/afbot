@@ -1,4 +1,4 @@
-pyrofork==2.3.68
+pyrofork==2.2.11
 tgcrypto
 pyropatch
 humanize
