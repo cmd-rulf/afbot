@@ -392,7 +392,7 @@ async def restart_pending_forwads(bot, user):
     user = user['user_id']
     settings = await db.get_forward_details(user)
     try:
-       skiping = max(0, settings['offset'] - 4)
+       skiping = settings['offset']
        fetch = settings['fetched'] - settings['skip']
        temp.forwardings += 1
        forward_id = await store_vars(user)
